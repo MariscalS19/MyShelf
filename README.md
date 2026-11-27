@@ -53,7 +53,7 @@ Plataforma web colaborativa para gestionar listas de mandado, inventario y gasto
 El repositorio está organizado como un **monorepo** sencillo para separar responsabilidades y reducir conflictos en Git:
 
 ```text
-PI_MyShelf/
+MyShelf/
 ├── .gitignore
 ├── README.md
 ├── docs/
@@ -65,12 +65,15 @@ PI_MyShelf/
 │       ├── app/                 # Páginas y rutas (grupos, mandado, inventario, análisis)
 │       ├── components/          # Componentes UI reutilizables (selector de grupo, tarjetas, modales)
 │       ├── services/            # Funciones de consumo de la API separadas por recurso
+│       ├── hooks/               # useDatos: carga + polling con limpieza del intervalo
+│       ├── lib/                 # Formato de dinero, fechas y catálogos de categorías
 │       └── types/               # Tipos / interfaces de datos del frontend
 └── backend/                     # API y lógica de negocio en FastAPI + PostgreSQL
     ├── .env.example             # Plantilla de variables de entorno (sin credenciales reales)
     ├── requirements.txt         # Dependencias de Python
     └── app/
         ├── main.py              # Instancia de FastAPI, CORS y registro de routers
+        ├── seed.py              # Datos de prueba: python -m app.seed [--reset]
         ├── core/
         │   ├── config.py        # Lectura de configuración y variables de entorno
         │   └── database.py      # Conexión a PostgreSQL y manejo de sesiones
@@ -91,6 +94,16 @@ PI_MyShelf/
 * **`miembros_grupo`**: `id`, `usuario_id`, `grupo_id`, `rol` (relación N:M).
 * **`items_mandado_inventario`**: `id`, `grupo_id`, `agregado_por_id`, `nombre`, `categoria`, `estado` (`pendiente`, `comprado`, `en_inventario`), `cantidad`, `precio_estimado`, `precio_pagado`, `fecha_caducidad`, `imagen_url`, `detalles` (`JSONB`), `creado_en`.
 * **`catalogo_base` (opcional)**: sugerencias y valores por defecto para agilizar la carga de productos.
+
+> **Extras implementados en `items_mandado_inventario`:** `comprado_en` (cuándo se compró, para el gasto de los últimos 30 días) y `consumido_en` (cuándo se acabó). Un ítem consumido ya no aparece en las listas, pero su gasto sigue contando en el análisis. Los precios son el **total del renglón**, no por unidad.
+
+### Flujo de estados de un ítem
+```text
+pendiente ──► comprado ──► en_inventario ──(se acabó)──► consumido (+ opcional: nuevo ítem pendiente)
+    └──────────────────────────▲
+comprado ──► pendiente   (deshacer compra)
+```
+Cualquier otra transición responde `400`. Si se compra sin capturar precio, el precio estimado se toma como pagado.
 
 ### Reglas obligatorias de datos
 * **Aislamiento por grupo:** Toda consulta de ítems, inventario o métricas debe filtrar por `grupo_id`.
@@ -126,7 +139,7 @@ El detalle específico de cada eje se documenta en `docs/tasks/` (`API.md`, `Bac
 ### 1. Clonar y preparar el repositorio
 ```bash
 git clone https://github.com/MariscalS19/MyShelf.git
-cd PI_MyShelf
+cd MyShelf
 ```
 
 ### 2. Backend (FastAPI)
@@ -146,6 +159,10 @@ pip install -r requirements.txt
 fastapi dev app/main.py
 ```
 
+* Las tablas se crean solas al arrancar la API (`Base.metadata.create_all`).
+* **Datos de prueba:** `python -m app.seed` agrega 3 usuarios (Emiliano #1, Héctor #2, Daniel #3) y los grupos *Familia* (código `FAM123`) y *Dieta Gym* (código `GYM456`). Con `python -m app.seed --reset` se borra todo y se vuelve a sembrar.
+* **Crear la base en PostgreSQL** (una sola vez, desde `psql` o pgAdmin): `CREATE DATABASE myshelf;`
+
 * **API disponible en:** `http://127.0.0.1:8000`
 * **Documentación interactiva:** `http://127.0.0.1:8000/docs`
 
@@ -160,6 +177,25 @@ npm run dev
 ```
 
 * **Aplicación disponible en:** `http://localhost:3000`
+* Para entrar con los datos de prueba: **Ya tengo usuario** → número `1`.
+
+### Endpoints principales
+
+| Método | Ruta | Para qué |
+| :--- | :--- | :--- |
+| `POST` | `/usuarios` | Registrar usuario (solo nombre) |
+| `GET` | `/usuarios/{id}/grupos` | Grupos de un usuario |
+| `POST` | `/grupos` | Crear grupo (el creador queda como admin y se genera el código) |
+| `POST` | `/grupos/unirse` | Unirse con `codigo_invitacion` |
+| `GET` | `/grupos/{id}/miembros` | Miembros del grupo |
+| `GET` | `/grupos/{id}/items?estado=&categoria=&buscar=` | Listar ítems del grupo |
+| `POST` | `/grupos/{id}/items` | Crear ítem |
+| `PATCH` | `/grupos/{id}/items/{item_id}` | Actualizar estado, cantidad, precios… |
+| `POST` | `/grupos/{id}/items/{item_id}/consumir?reponer=true` | Se acabó (y opcionalmente volver a comprar) |
+| `DELETE` | `/grupos/{id}/items/{item_id}` | Eliminar ítem |
+| `GET` | `/grupos/{id}/analisis` | Gasto total, por categoría, más comprados y alertas de caducidad |
+
+Todas las rutas de ítems y análisis cuelgan de `/grupos/{id}` para que sea imposible mezclar datos entre grupos. El detalle completo (esquemas y ejemplos) está en `http://127.0.0.1:8000/docs`.
 
 ---
 
