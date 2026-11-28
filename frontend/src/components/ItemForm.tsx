@@ -3,16 +3,11 @@
 import { useState } from "react";
 import { Boton, Campo, ErrorMensaje, inputClase } from "@/src/components/ui";
 import { CATEGORIAS } from "@/src/lib/formato";
+import { limpiarDecimal } from "@/src/lib/numero";
 import type { DetallesItem, EstadoItem, Item, ItemCrear } from "@/src/types";
 
 const UNIDADES = ["pza", "kg", "g", "L", "ml", "paquete"];
-
-/** Acepta "45", "45.5" o "45.50" y lo deja como string con 2 decimales máximo. */
-function limpiarNumero(v: string) {
-  const s = v.replace(",", ".").replace(/[^\d.]/g, "");
-  const [ent, ...dec] = s.split(".");
-  return dec.length ? `${ent}.${dec.join("").slice(0, 2)}` : ent;
-}
+const UNIDADES_FRACCIONABLES = ["kg", "L", "ml"];
 
 interface Props {
   estadoInicial: EstadoItem;
@@ -26,7 +21,7 @@ export function ItemForm({ estadoInicial, item, onGuardar, onCancelar }: Props) 
   const [nombre, setNombre] = useState(item?.nombre ?? "");
   const [categoria, setCategoria] = useState(item?.categoria ?? "otros");
   const [cantidad, setCantidad] = useState(item ? item.cantidad.replace(/\.00$/, "") : "1");
-  const [unidad, setUnidad] = useState(String(detallesIniciales.unidad ?? "pza"));
+  const [unidad, setUnidad] = useState(item ? String(detallesIniciales.unidad ?? "") : "");
   const [marca, setMarca] = useState(String(detallesIniciales.marca ?? ""));
   const [precioEstimado, setPrecioEstimado] = useState(item?.precio_estimado ?? "");
   const [precioPagado, setPrecioPagado] = useState(item?.precio_pagado ?? "");
@@ -37,10 +32,34 @@ export function ItemForm({ estadoInicial, item, onGuardar, onCancelar }: Props) 
 
   const estado = item?.estado ?? estadoInicial;
   const yaComprado = estado !== "pendiente";
+  const permiteFracciones = UNIDADES_FRACCIONABLES.includes(unidad);
+
+  function cambiarUnidad(nuevaUnidad: string) {
+    const cantidadActual = Number(cantidad);
+    if (
+      !UNIDADES_FRACCIONABLES.includes(nuevaUnidad) &&
+      cantidad !== "" &&
+      Number.isFinite(cantidadActual) &&
+      !Number.isInteger(cantidadActual)
+    ) {
+      setError("La cantidad debe ser un número entero antes de cambiar a esa unidad.");
+      return;
+    }
+
+    if (!UNIDADES_FRACCIONABLES.includes(nuevaUnidad) && cantidad !== "" && Number.isInteger(cantidadActual)) {
+      setCantidad(String(cantidadActual));
+    }
+    setUnidad(nuevaUnidad);
+    setError(null);
+  }
 
   async function enviar(e: React.FormEvent) {
     e.preventDefault();
+    if (!unidad) return setError("Selecciona una unidad de medida.");
     if (!(Number(cantidad) > 0)) return setError("La cantidad debe ser mayor a 0");
+    if (!permiteFracciones && !Number.isInteger(Number(cantidad))) {
+      return setError("Para esta unidad, la cantidad debe ser un número entero.");
+    }
     setGuardando(true);
     setError(null);
     // Se conservan otros detalles que ya existieran en el JSONB
@@ -89,26 +108,46 @@ export function ItemForm({ estadoInicial, item, onGuardar, onCancelar }: Props) 
         </div>
       </fieldset>
 
-      <div className="grid grid-cols-2 gap-3">
-        <Campo etiqueta="Cantidad">
-          <input className={inputClase} inputMode="decimal" value={cantidad} onChange={(e) => setCantidad(limpiarNumero(e.target.value))} required />
+      <Campo etiqueta="Unidad de medida">
+        <select className={inputClase} value={unidad} onChange={(e) => cambiarUnidad(e.target.value)} required>
+          <option value="" disabled>Selecciona una unidad</option>
+          {[...new Set([...UNIDADES, unidad].filter(Boolean))].map((u) => (
+            <option key={u}>{u}</option>
+          ))}
+        </select>
+      </Campo>
+
+      {unidad && (
+        <Campo etiqueta="Cantidad" ayuda={permiteFracciones ? "Hasta 2 decimales" : "Usa un número entero"}>
+          <input
+            className={inputClase}
+            inputMode={permiteFracciones ? "decimal" : "numeric"}
+            value={cantidad}
+            onChange={(e) => {
+              const nuevo = limpiarDecimal(e.target.value, 8, permiteFracciones ? 2 : 0);
+              if (nuevo !== null) {
+                setCantidad(nuevo);
+                setError(null);
+              }
+            }}
+            required
+          />
         </Campo>
-        <Campo etiqueta="Unidad">
-          <select className={inputClase} value={unidad} onChange={(e) => setUnidad(e.target.value)}>
-            {[...new Set([...UNIDADES, unidad])].map((u) => (
-              <option key={u}>{u}</option>
-            ))}
-          </select>
-        </Campo>
-      </div>
+      )}
 
       <div className="grid grid-cols-2 gap-3">
-        <Campo etiqueta="Precio estimado" ayuda="Total del renglón">
-          <input className={inputClase} inputMode="decimal" value={precioEstimado} onChange={(e) => setPrecioEstimado(limpiarNumero(e.target.value))} placeholder="$0.00" />
+        <Campo etiqueta="Precio estimado" ayuda="Total del renglón · Máximo 2 decimales">
+          <input className={inputClase} inputMode="decimal" value={precioEstimado} onChange={(e) => {
+            const nuevo = limpiarDecimal(e.target.value, 10);
+            if (nuevo !== null) setPrecioEstimado(nuevo);
+          }} placeholder="$0.00" />
         </Campo>
         {yaComprado ? (
-          <Campo etiqueta="Precio pagado">
-            <input className={inputClase} inputMode="decimal" value={precioPagado} onChange={(e) => setPrecioPagado(limpiarNumero(e.target.value))} placeholder="$0.00" />
+          <Campo etiqueta="Precio pagado" ayuda="Máximo 2 decimales">
+            <input className={inputClase} inputMode="decimal" value={precioPagado} onChange={(e) => {
+              const nuevo = limpiarDecimal(e.target.value, 10);
+              if (nuevo !== null) setPrecioPagado(nuevo);
+            }} placeholder="$0.00" />
           </Campo>
         ) : (
           <Campo etiqueta="Marca (opcional)">

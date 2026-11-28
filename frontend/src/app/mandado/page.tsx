@@ -8,6 +8,7 @@ import { ItemForm } from "@/src/components/ItemForm";
 import { Boton, Campo, Cargando, ErrorMensaje, Modal, Vacio, inputClase } from "@/src/components/ui";
 import { useDatos } from "@/src/hooks/useDatos";
 import { dinero } from "@/src/lib/formato";
+import { limpiarDecimal } from "@/src/lib/numero";
 import { analisisService } from "@/src/services/analisis";
 import { itemsService } from "@/src/services/items";
 import type { Item } from "@/src/types";
@@ -121,7 +122,8 @@ function Mandado({ grupoId }: { grupoId: number }) {
           estadoInicial="pendiente"
           onCancelar={() => setAgregando(false)}
           onGuardar={async (d) => {
-            await itemsService.crear(grupoId, { ...d, agregado_por_id: usuario?.id });
+           let test = await itemsService.crear(grupoId, { ...d, agregado_por_id: usuario?.id });
+           console.log(test)
             setAgregando(false);
             await recargar();
           }}
@@ -188,8 +190,11 @@ function ModalCompra({ item, onConfirmar, onCerrar }: { item: Item; onConfirmar:
       <p className="text-stone-600">
         Marcando <strong className="text-stone-900">{item.nombre}</strong> como comprado.
       </p>
-      <Campo etiqueta="Precio pagado (total)" ayuda={item.precio_estimado ? `Estimado: ${dinero(item.precio_estimado)}` : "Déjalo vacío si no lo sabes"}>
-        <input className={inputClase} inputMode="decimal" autoFocus value={precio} onChange={(e) => setPrecio(e.target.value.replace(",", ".").replace(/[^\d.]/g, ""))} placeholder="$0.00" />
+      <Campo etiqueta="Precio pagado (total)" ayuda={`${item.precio_estimado ? `Estimado: ${dinero(item.precio_estimado)} · ` : "Déjalo vacío si no lo sabes · "}Máximo 2 decimales`}>
+        <input className={inputClase} inputMode="decimal" autoFocus value={precio} onChange={(e) => {
+          const nuevo = limpiarDecimal(e.target.value, 10);
+          if (nuevo !== null) setPrecio(nuevo);
+        }} placeholder="$0.00" />
       </Campo>
       {error && <ErrorMensaje mensaje={error} />}
       <div className="grid gap-2">
